@@ -1,0 +1,820 @@
+#!/usr/bin/env python3
+"""
+claude-monitor -- Claude Code Build Monitor CLI  v3.0
+Kurulum, gecmis sorgulama, pattern yonetimi, ses yonetimi ve ayar degistirme.
+
+Kullanim:
+  claude-monitor install
+  claude-monitor uninstall
+  claude-monitor status
+  claude-monitor history [--tool TOOL] [--limit N]
+  claude-monitor stats
+  claude-monitor test-pattern "npm run build"
+  claude-monitor list-patterns
+  claude-monitor add-pattern REGEX LABEL TOOL_ID
+  claude-monitor sound list
+  claude-monitor sound add <isim> <dosya_yolu>
+  claude-monitor sound remove <isim>
+  claude-monitor sound set-success <isim>
+  claude-monitor sound set-failure <isim>
+  claude-monitor sound test <isim>
+  claude-monitor sound on|off
+  claude-monitor config sound /path/to/file.mp3
+  claude-monitor config phase-interval 10
+  claude-monitor config disable 1|0
+"""
+from __future__ import annotations
+
+import sys
+import os
+import json
+import re
+import shutil
+import subprocess
+from pathlib import Path
+from datetime import datetime
+from typing import List
+
+# ─── Paths ────────────────────────────────────────────────────────────────────
+
+HOOKS_DIR    = Path.home() / ".claude" / "hooks"
+SETTINGS     = Path.home() / ".claude" / "settings.json"
+HISTORY_DB   = Path.home() / ".claude" / "build_history.db"
+SOUNDS_CONFIG = Path.home() / ".claude" / "monitor_sounds.json"
+CUSTOM_PATTERNS_FILE = Path.home() / ".claude" / "monitor_patterns.json"
+
+# ─── Colors (inline - CLI disarida calisir, shared/ import edemeyebilir) ─────
+
+def _supports_color() -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    if not hasattr(sys.stdout, "isatty") or not sys.stdout.isatty():
+        return False
+    term = os.environ.get("TERM", "")
+    return term != "dumb"
+
+_COLOR = _supports_color()
+def _c(code: str) -> str:
+    return code if _COLOR else ""
+
+RESET  = _c("\033[0m")
+BOLD   = _c("\033[1m")
+DIM    = _c("\033[2m")
+GREEN  = _c("\033[38;5;114m")
+RED    = _c("\033[38;5;210m")
+YELLOW = _c("\033[38;5;221m")
+BLUE   = _c("\033[38;5;111m")
+GRAY   = _c("\033[38;5;242m")
+PURPLE = _c("\033[38;5;141m")
+CYAN   = _c("\033[38;5;87m")
+
+def ok(msg):   print(f"  {GREEN}+{RESET}  {msg}")
+def err(msg):  print(f"  {RED}x{RESET}  {msg}")
+def info(msg): print(f"  {BLUE}.{RESET}  {msg}")
+def warn(msg): print(f"  {YELLOW}!{RESET}  {msg}")
+
+def section(title):
+    print(f"\n{BOLD}{title}{RESET}")
+    print(f"{DIM}{'-' * 48}{RESET}")
+
+# ─── install ──────────────────────────────────────────────────────────────────
+
+def cmd_install():
+    section("Claude Code Build Monitor -- Kurulum")
+
+    if sys.version_info < (3, 8):
+        err(f"Python 3.8+ gerekli (mevcut: {sys.version_info.major}.{sys.version_info.minor})")
+        sys.exit(1)
+    ok(f"Python {sys.version_info.major}.{sys.version_info.minor}")
+
+    script_dir = Path(__file__).parent / "hooks"
+    shared_dir = Path(__file__).parent / "shared"
+
+    if not script_dir.exists():
+        err(f"hooks/ dizini bulunamadi: {script_dir}")
+        sys.exit(1)
+
+    HOOKS_DIR.mkdir(parents=True, exist_ok=True)
+    for name in ["pre_tool_use.py", "post_tool_use.py", "overlay.py"]:
+        src = script_dir / name
+        dst = HOOKS_DIR / name
+        if not src.exists():
+            err(f"{name} bulunamadi")
+            sys.exit(1)
+        shutil.copy2(src, dst)
+        dst.chmod(0o755)
+        ok(f"Kopyalandi: {dst}")
+
+    # shared/ modulu
+    target_shared = HOOKS_DIR.parent / "monitor_shared"
+    if shared_dir.exists():
+        if target_shared.exists():
+            shutil.rmtree(target_shared)
+        shutil.copytree(shared_dir, target_shared)
+        ok(f"shared/ -> {target_shared}")
+
+    _register_hooks()
+
+    cli_target = Path.home() / ".local" / "bin" / "claude-monitor"
+    try:
+        cli_target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(Path(__file__), cli_target)
+        cli_target.chmod(0o755)
+        ok(f"CLI kuruldu: {cli_target}")
+        info("PATH'de yoksa: export PATH=\"$HOME/.local/bin:$PATH\"")
+    except OSError as e:
+        warn(f"CLI binary kurulamadi: {e}")
+
+    # Varsayilan ses konfigurasyonu olustur
+    _init_sound_config()
+
+    print()
+    ok("Kurulum tamamlandi -- Claude Code'u yeniden baslat")
+
+
+def _register_hooks():
+    if SETTINGS.exists():
+        try:
+            config = json.loads(SETTINGS.read_text())
+        except (json.JSONDecodeError, OSError):
+            config = {}
+    else:
+        config = {}
+
+    hooks = config.setdefault("hooks", [])
+    pre_cmd  = f"python3 {HOOKS_DIR}/pre_tool_use.py"
+    post_cmd = f"python3 {HOOKS_DIR}/post_tool_use.py"
+
+    existing = []
+    for h in hooks:
+        for inner in h.get("hooks", []):
+            existing.append(inner.get("command", ""))
+
+    added = []
+    if pre_cmd not in existing:
+        hooks.insert(0, {
+            "event": "PreToolUse", "matcher": "Bash",
+            "hooks": [{"type": "command", "command": pre_cmd}]
+        })
+        added.append("PreToolUse")
+    if post_cmd not in existing:
+        hooks.append({
+            "event": "PostToolUse", "matcher": "Bash",
+            "hooks": [{"type": "command", "command": post_cmd}]
+        })
+        added.append("PostToolUse")
+
+    SETTINGS.write_text(json.dumps(config, indent=2))
+    if added:
+        ok(f"Hook'lar eklendi: {', '.join(added)}")
+    else:
+        info("Hook'lar zaten kayitli")
+
+# ─── uninstall ────────────────────────────────────────────────────────────────
+
+def cmd_uninstall():
+    section("Kaldiriliyor")
+    for name in ["pre_tool_use.py", "post_tool_use.py", "overlay.py"]:
+        f = HOOKS_DIR / name
+        if f.exists():
+            f.unlink()
+            ok(f"Silindi: {f}")
+
+    # shared modul
+    target_shared = HOOKS_DIR.parent / "monitor_shared"
+    if target_shared.exists():
+        shutil.rmtree(target_shared)
+        ok(f"Silindi: {target_shared}")
+
+    if SETTINGS.exists():
+        try:
+            config = json.loads(SETTINGS.read_text())
+            hooks = config.get("hooks", [])
+            hooks = [
+                h for h in hooks
+                if not any("pre_tool_use" in inner.get("command", "") or
+                           "post_tool_use" in inner.get("command", "")
+                           for inner in h.get("hooks", []))
+            ]
+            config["hooks"] = hooks
+            SETTINGS.write_text(json.dumps(config, indent=2))
+            ok("settings.json temizlendi")
+        except (json.JSONDecodeError, OSError) as e:
+            warn(f"settings.json guncellenemedi: {e}")
+
+    cli = Path.home() / ".local" / "bin" / "claude-monitor"
+    if cli.exists():
+        cli.unlink()
+        ok(f"CLI kaldirildi: {cli}")
+
+    ok("Kaldirma tamamlandi")
+
+# ─── status ───────────────────────────────────────────────────────────────────
+
+def cmd_status():
+    section("Durum")
+
+    hooks_ok = all((HOOKS_DIR / n).exists() for n in ["pre_tool_use.py", "post_tool_use.py", "overlay.py"])
+    if hooks_ok:
+        ok(f"Hook dosyalari: {HOOKS_DIR}")
+    else:
+        err("Hook dosyalari eksik -- claude-monitor install calistir")
+
+    if SETTINGS.exists():
+        try:
+            config = json.loads(SETTINGS.read_text())
+            hooks = config.get("hooks", [])
+            has_pre  = any("pre_tool_use"  in inner.get("command", "") for h in hooks for inner in h.get("hooks", []))
+            has_post = any("post_tool_use" in inner.get("command", "") for h in hooks for inner in h.get("hooks", []))
+            if has_pre and has_post:
+                ok("settings.json: hook'lar kayitli")
+            else:
+                warn("settings.json: hook'lar eksik")
+        except (json.JSONDecodeError, OSError):
+            err("settings.json parse hatasi")
+    else:
+        err("settings.json bulunamadi")
+
+    # Aktif overlay
+    import tempfile
+    uid = os.getuid()
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        pid_file = Path(runtime) / "claude_build_monitor" / "overlay.pid"
+    else:
+        pid_file = Path(tempfile.gettempdir()) / f"claude_build_monitor_{uid}" / "overlay.pid"
+
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+            os.kill(pid, 0)
+            ok(f"Overlay aktif (pid={pid})")
+        except (ValueError, ProcessLookupError, OSError):
+            info("Overlay su an calismiyor")
+    else:
+        info("Overlay su an calismiyor")
+
+    if HISTORY_DB.exists():
+        size = HISTORY_DB.stat().st_size
+        ok(f"Build gecmisi: {HISTORY_DB}  ({size//1024}KB)")
+    else:
+        info("Build gecmisi henuz yok (ilk build'den sonra olusur)")
+
+    # Ses durumu
+    config = _load_sound_config()
+    if config.get("enabled", True):
+        active_s = config.get("active_success", "sistem varsayilani")
+        active_f = config.get("active_failure", "sistem varsayilani")
+        ok(f"Ses: ACIK (basari={active_s}, hata={active_f})")
+    else:
+        info("Ses: KAPALI")
+
+# ─── history ──────────────────────────────────────────────────────────────────
+
+def cmd_history(args):
+    section("Build Gecmisi")
+
+    tool_filter = None
+    limit = 20
+    i = 0
+    while i < len(args):
+        if args[i] == "--tool" and i + 1 < len(args):
+            tool_filter = args[i + 1].upper()
+            i += 2
+        elif args[i] == "--limit" and i + 1 < len(args):
+            limit = int(args[i + 1])
+            i += 2
+        else:
+            i += 1
+
+    if not HISTORY_DB.exists():
+        info("Gecmis bulunamadi -- ilk build'den sonra dolar")
+        return
+
+    try:
+        import sqlite3
+        with sqlite3.connect(str(HISTORY_DB)) as conn:
+            query = """
+                SELECT tool, label, project_name, duration, success, timestamp
+                FROM builds
+                {}
+                ORDER BY timestamp DESC LIMIT ?
+            """.format("WHERE tool = ?" if tool_filter else "")
+            params = ([tool_filter, limit] if tool_filter else [limit])
+            rows = conn.execute(query, params).fetchall()
+    except Exception as e:
+        err(f"DB okuma hatasi: {e}")
+        return
+
+    if not rows:
+        info("Kayit yok")
+        return
+
+    print(f"  {'Arac':<10}{'Proje':<18}{'Komut':<20}{'Sure':>7}  {'Tarih':<20}")
+    print(f"  {DIM}{'-'*10}{'-'*18}{'-'*20}{'-'*7}  {'-'*20}{RESET}")
+    for tool, label, project, dur, success, ts in rows:
+        icon    = f"{GREEN}+{RESET}" if success else f"{RED}x{RESET}"
+        dur_s   = f"{int(dur)}s" if dur and dur < 60 else (f"{int(dur//60)}m{int(dur%60):02d}s" if dur else "?")
+        proj    = (project or "")[:16]
+        lbl     = label[:18]
+        ts_fmt  = ts[:16] if ts else ""
+        print(f"  {icon} {PURPLE}{tool:<8}{RESET}  {proj:<16}  {lbl:<18}  {dur_s:>6}  {GRAY}{ts_fmt}{RESET}")
+
+# ─── stats ────────────────────────────────────────────────────────────────────
+
+def cmd_stats():
+    section("Build Istatistikleri")
+
+    if not HISTORY_DB.exists():
+        info("Gecmis bulunamadi")
+        return
+
+    try:
+        import sqlite3
+        with sqlite3.connect(str(HISTORY_DB)) as conn:
+            rows = conn.execute("""
+                SELECT tool,
+                       COUNT(*) as total,
+                       SUM(success) as successes,
+                       AVG(CASE WHEN success=1 THEN duration END) as avg_dur,
+                       MIN(CASE WHEN success=1 THEN duration END) as min_dur,
+                       MAX(CASE WHEN success=1 THEN duration END) as max_dur
+                FROM builds
+                GROUP BY tool
+                ORDER BY total DESC
+            """).fetchall()
+    except Exception as e:
+        err(f"DB okuma hatasi: {e}")
+        return
+
+    def fmt_dur(d):
+        if d is None:
+            return "   -  "
+        d = float(d)
+        if d < 60:
+            return f"{int(d):3d}s "
+        return f"{int(d//60)}m{int(d%60):02d}s"
+
+    print(f"  {'Arac':<10}{'Toplam':>7}{'Basari':>8}{'Ort.':>8}{'Min':>7}{'Maks':>7}")
+    print(f"  {DIM}{'-'*10}{'-'*7}{'-'*8}{'-'*8}{'-'*7}{'-'*7}{RESET}")
+    for tool, total, succ, avg, mn, mx in rows:
+        pct = int((succ / total) * 100) if total else 0
+        pct_color = GREEN if pct >= 90 else (YELLOW if pct >= 70 else RED)
+        print(
+            f"  {PURPLE}{tool:<10}{RESET}"
+            f"  {total:>5}"
+            f"  {pct_color}{pct:>5}%{RESET}"
+            f"  {fmt_dur(avg):>7}"
+            f"  {fmt_dur(mn):>6}"
+            f"  {fmt_dur(mx):>6}"
+        )
+
+    try:
+        with sqlite3.connect(str(HISTORY_DB)) as conn:
+            total_row = conn.execute(
+                "SELECT COUNT(*), SUM(success), SUM(duration) FROM builds"
+            ).fetchone()
+    except Exception:
+        total_row = None
+
+    if total_row:
+        total, succ, total_dur = total_row
+        td = total_dur or 0
+        print(f"\n  {DIM}Toplam: {total} build, {int(succ)} basarili, "
+              f"{int(td//3600)}sa {int((td%3600)//60)}dk toplam sure{RESET}")
+
+# ─── test-pattern ─────────────────────────────────────────────────────────────
+
+def cmd_test_pattern(args):
+    if not args:
+        err("Kullanim: claude-monitor test-pattern \"komut\"")
+        return
+
+    command = " ".join(args)
+    section(f"Pattern Testi: {command!r}")
+
+    pre = HOOKS_DIR / "pre_tool_use.py"
+    if not pre.exists():
+        err("pre_tool_use.py bulunamadi -- once install calistir")
+        return
+
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("pre", str(pre))
+    mod  = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    # shared.patterns.detect_build_command fonksiyonunu direkt import etmeye calis
+    try:
+        monitor_shared = HOOKS_DIR.parent / "monitor_shared"
+        if str(monitor_shared.parent) not in sys.path:
+            sys.path.insert(0, str(monitor_shared.parent))
+        from monitor_shared.patterns import detect_build_command
+        result = detect_build_command(command)
+    except ImportError:
+        # Fallback: eski yontem
+        result = mod.detect_build_command(command) if hasattr(mod, 'detect_build_command') else None
+
+    if result:
+        label, tool = result
+        ok(f"Eslesti: [{tool}] {label!r}")
+    else:
+        info(f"Eslesme yok -- komut oldugu gibi calisir, overlay baslamaz")
+
+# ─── list-patterns ────────────────────────────────────────────────────────────
+
+def cmd_list_patterns():
+    section("Build Pattern Listesi")
+
+    try:
+        monitor_shared = HOOKS_DIR.parent / "monitor_shared"
+        if str(monitor_shared.parent) not in sys.path:
+            sys.path.insert(0, str(monitor_shared.parent))
+        from monitor_shared.patterns import load_patterns
+        patterns = load_patterns()
+    except ImportError:
+        # Fallback
+        pre = HOOKS_DIR / "pre_tool_use.py"
+        if not pre.exists():
+            err("pre_tool_use.py bulunamadi")
+            return
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("pre", str(pre))
+        mod  = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        patterns = mod.BUILD_PATTERNS if hasattr(mod, 'BUILD_PATTERNS') else []
+
+    current_tool = None
+    for pattern, label, tool in patterns:
+        if tool != current_tool:
+            print(f"\n  {PURPLE}{BOLD}{tool}{RESET}")
+            current_tool = tool
+        print(f"    {GRAY}{pattern:<55}{RESET}  -> {label!r}")
+
+# ─── add-pattern ─────────────────────────────────────────────────────────────
+
+def cmd_add_pattern(args):
+    if len(args) < 3:
+        err("Kullanim: claude-monitor add-pattern REGEX LABEL TOOL_ID")
+        err("Ornek:    claude-monitor add-pattern '\\\\bmybuild\\\\b' 'my build' 'MBT'")
+        return
+
+    regex, label, tool = args[0], args[1], args[2].upper()
+
+    try:
+        re.compile(regex)
+    except re.error as e:
+        err(f"Gecersiz regex: {e}")
+        return
+
+    # JSON dosyasina yaz (kaynak dosya yerine)
+    customs: list = []
+    if CUSTOM_PATTERNS_FILE.exists():
+        try:
+            customs = json.loads(CUSTOM_PATTERNS_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            customs = []
+
+    customs.append({"regex": regex, "label": label, "tool": tool})
+
+    try:
+        CUSTOM_PATTERNS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CUSTOM_PATTERNS_FILE.write_text(json.dumps(customs, indent=2))
+        ok(f"Pattern eklendi: [{tool}] {regex!r} -> {label!r}")
+        info(f"Kaydedildi: {CUSTOM_PATTERNS_FILE}")
+    except OSError as e:
+        err(f"Kayit basarisiz: {e}")
+
+# ─── sound ───────────────────────────────────────────────────────────────────
+
+def _load_sound_config() -> dict:
+    if SOUNDS_CONFIG.exists():
+        try:
+            return json.loads(SOUNDS_CONFIG.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"active_success": "", "active_failure": "", "custom_sounds": [], "enabled": True}
+
+
+def _save_sound_config(config: dict) -> bool:
+    try:
+        SOUNDS_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        SOUNDS_CONFIG.write_text(json.dumps(config, indent=2))
+        return True
+    except OSError as e:
+        err(f"Kayit basarisiz: {e}")
+        return False
+
+
+def _discover_system_sounds() -> List[dict]:
+    """Sistem ses dosyalarini kesfet."""
+    sounds = []
+    if sys.platform == "darwin":
+        sound_dir = Path("/System/Library/Sounds")
+        if sound_dir.exists():
+            for f in sorted(sound_dir.iterdir()):
+                if f.suffix in (".aiff", ".wav", ".mp3"):
+                    sounds.append({"name": f.stem, "path": str(f)})
+    elif sys.platform.startswith("linux"):
+        for base in [Path("/usr/share/sounds/freedesktop/stereo"),
+                     Path("/usr/share/sounds/gnome/default/alerts")]:
+            if base.exists():
+                for f in sorted(base.iterdir()):
+                    if f.suffix in (".oga", ".wav", ".mp3"):
+                        sounds.append({"name": f.stem, "path": str(f)})
+    return sounds
+
+
+def _init_sound_config() -> None:
+    """Ilk kurulumda varsayilan ses konfigurasyonunu olustur."""
+    if SOUNDS_CONFIG.exists():
+        return
+
+    system_sounds = _discover_system_sounds()
+    config = {
+        "active_success": "",
+        "active_failure": "",
+        "custom_sounds": system_sounds,
+        "enabled": True,
+    }
+
+    # Varsayilan sesleri sec
+    if sys.platform == "darwin":
+        config["active_success"] = "Tink"
+        config["active_failure"] = "Basso"
+    elif sys.platform.startswith("linux"):
+        for s in system_sounds:
+            if "complete" in s["name"].lower():
+                config["active_success"] = s["name"]
+                break
+        for s in system_sounds:
+            if "error" in s["name"].lower():
+                config["active_failure"] = s["name"]
+                break
+
+    _save_sound_config(config)
+    ok("Varsayilan ses konfigurasyonu olusturuldu")
+
+
+def _play_sound_file(path: str) -> bool:
+    """Tek bir ses dosyasini cal."""
+    if not Path(path).exists():
+        err(f"Dosya bulunamadi: {path}")
+        return False
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["afplay", path], timeout=10)
+        elif sys.platform.startswith("linux"):
+            for player in ["paplay", "aplay", "mpg123"]:
+                try:
+                    subprocess.run([player, path], timeout=10)
+                    return True
+                except FileNotFoundError:
+                    continue
+            err("Ses oynatici bulunamadi (paplay/aplay/mpg123)")
+            return False
+        return True
+    except (subprocess.SubprocessError, OSError) as e:
+        err(f"Ses calinamadi: {e}")
+        return False
+
+
+def cmd_sound(args):
+    if not args:
+        args = ["list"]
+
+    subcmd = args[0]
+    rest = args[1:]
+
+    if subcmd == "list":
+        section("Ses Listesi")
+        config = _load_sound_config()
+
+        enabled_str = f"{GREEN}ACIK{RESET}" if config.get("enabled", True) else f"{RED}KAPALI{RESET}"
+        print(f"  Durum: {enabled_str}")
+        print(f"  Basari sesi: {PURPLE}{config.get('active_success', '-')}{RESET}")
+        print(f"  Hata sesi:   {PURPLE}{config.get('active_failure', '-')}{RESET}")
+        print()
+
+        sounds = config.get("custom_sounds", [])
+        if sounds:
+            print(f"  {'Isim':<20}{'Dosya'}")
+            print(f"  {DIM}{'-'*20}{'-'*40}{RESET}")
+            for s in sounds:
+                name = s.get("name", "?")
+                path = s.get("path", "?")
+                exists = Path(path).exists()
+                status_icon = f"{GREEN}+{RESET}" if exists else f"{RED}x{RESET}"
+                # Aktif olan sesleri isaretler
+                marker = ""
+                if name == config.get("active_success"):
+                    marker = f" {GREEN}[basari]{RESET}"
+                if name == config.get("active_failure"):
+                    marker = f" {RED}[hata]{RESET}"
+                print(f"  {status_icon} {CYAN}{name:<18}{RESET}{GRAY}{path}{RESET}{marker}")
+        else:
+            info("Henuz ses eklenmemis")
+            info("Sistem seslerini kesfetmek icin: claude-monitor sound discover")
+
+    elif subcmd == "discover":
+        section("Sistem Sesleri Kesfediliyor")
+        system_sounds = _discover_system_sounds()
+        if system_sounds:
+            config = _load_sound_config()
+            existing_names = {s["name"] for s in config.get("custom_sounds", [])}
+            added = 0
+            for s in system_sounds:
+                if s["name"] not in existing_names:
+                    config.setdefault("custom_sounds", []).append(s)
+                    added += 1
+                    ok(f"{s['name']} -> {s['path']}")
+            if added:
+                _save_sound_config(config)
+                ok(f"{added} yeni ses kesfedildi ve eklendi")
+            else:
+                info("Tum sistem sesleri zaten kayitli")
+        else:
+            info("Sistem ses dosyasi bulunamadi")
+
+    elif subcmd == "add":
+        if len(rest) < 2:
+            err("Kullanim: claude-monitor sound add <isim> <dosya_yolu>")
+            return
+        name, path = rest[0], rest[1]
+        full_path = str(Path(path).expanduser().resolve())
+        if not Path(full_path).exists():
+            err(f"Dosya bulunamadi: {full_path}")
+            return
+        config = _load_sound_config()
+        # Ayni isimde varsa guncelle
+        sounds = config.setdefault("custom_sounds", [])
+        for s in sounds:
+            if s["name"] == name:
+                s["path"] = full_path
+                _save_sound_config(config)
+                ok(f"Guncellendi: {name} -> {full_path}")
+                return
+        sounds.append({"name": name, "path": full_path})
+        _save_sound_config(config)
+        ok(f"Eklendi: {name} -> {full_path}")
+
+    elif subcmd == "remove":
+        if not rest:
+            err("Kullanim: claude-monitor sound remove <isim>")
+            return
+        name = rest[0]
+        config = _load_sound_config()
+        sounds = config.get("custom_sounds", [])
+        original_len = len(sounds)
+        config["custom_sounds"] = [s for s in sounds if s.get("name") != name]
+        if len(config["custom_sounds"]) < original_len:
+            # Aktif sesleri temizle
+            if config.get("active_success") == name:
+                config["active_success"] = ""
+            if config.get("active_failure") == name:
+                config["active_failure"] = ""
+            _save_sound_config(config)
+            ok(f"Silindi: {name}")
+        else:
+            err(f"Ses bulunamadi: {name}")
+
+    elif subcmd == "set-success":
+        if not rest:
+            err("Kullanim: claude-monitor sound set-success <isim>")
+            return
+        name = rest[0]
+        config = _load_sound_config()
+        sounds = config.get("custom_sounds", [])
+        found = any(s["name"] == name for s in sounds)
+        if not found:
+            err(f"Ses bulunamadi: {name}")
+            info("Mevcut sesleri gormek icin: claude-monitor sound list")
+            return
+        config["active_success"] = name
+        _save_sound_config(config)
+        ok(f"Basari sesi ayarlandi: {name}")
+
+    elif subcmd == "set-failure":
+        if not rest:
+            err("Kullanim: claude-monitor sound set-failure <isim>")
+            return
+        name = rest[0]
+        config = _load_sound_config()
+        sounds = config.get("custom_sounds", [])
+        found = any(s["name"] == name for s in sounds)
+        if not found:
+            err(f"Ses bulunamadi: {name}")
+            info("Mevcut sesleri gormek icin: claude-monitor sound list")
+            return
+        config["active_failure"] = name
+        _save_sound_config(config)
+        ok(f"Hata sesi ayarlandi: {name}")
+
+    elif subcmd == "test":
+        if not rest:
+            err("Kullanim: claude-monitor sound test <isim>")
+            return
+        name = rest[0]
+        config = _load_sound_config()
+        sounds = config.get("custom_sounds", [])
+        for s in sounds:
+            if s["name"] == name:
+                info(f"Caliniyor: {name} ({s['path']})")
+                _play_sound_file(s["path"])
+                return
+        err(f"Ses bulunamadi: {name}")
+
+    elif subcmd in ("on", "off"):
+        config = _load_sound_config()
+        config["enabled"] = (subcmd == "on")
+        _save_sound_config(config)
+        status = "acildi" if subcmd == "on" else "kapatildi"
+        ok(f"Ses {status}")
+
+    else:
+        err(f"Bilinmeyen ses komutu: {subcmd}")
+        info("Kullanim: claude-monitor sound [list|add|remove|set-success|set-failure|test|on|off|discover]")
+
+# ─── config ───────────────────────────────────────────────────────────────────
+
+def cmd_config(args):
+    if len(args) < 2:
+        section("Mevcut Ayarlar")
+        for key in ["CLAUDE_MONITOR_SOUND", "CLAUDE_MONITOR_DISABLE",
+                    "CLAUDE_MONITOR_LOG", "CLAUDE_MONITOR_PHASE_INTERVAL"]:
+            val = os.environ.get(key, f"{DIM}(ayarlanmamis){RESET}")
+            info(f"{key} = {val}")
+        info("Ayar degistirmek icin: claude-monitor config <key> <value>")
+        info("Shell config'inize ekleyin: ~/.zshrc veya ~/.bashrc")
+        return
+
+    key_alias = {
+        "sound":          "CLAUDE_MONITOR_SOUND",
+        "disable":        "CLAUDE_MONITOR_DISABLE",
+        "log":            "CLAUDE_MONITOR_LOG",
+        "phase-interval": "CLAUDE_MONITOR_PHASE_INTERVAL",
+    }
+    key   = key_alias.get(args[0], args[0].upper())
+    value = args[1]
+
+    print()
+    info(f"Shell config'inize sunu ekleyin:")
+    print(f"\n    export {key}=\"{value}\"\n")
+    info("Ardindan terminali yeniden baslatin veya: source ~/.zshrc")
+
+# ─── Router ───────────────────────────────────────────────────────────────────
+
+COMMANDS = {
+    "install":       (cmd_install,       []),
+    "uninstall":     (cmd_uninstall,     []),
+    "status":        (cmd_status,        []),
+    "history":       (cmd_history,       ["--tool", "--limit"]),
+    "stats":         (cmd_stats,         []),
+    "test-pattern":  (cmd_test_pattern,  ["<komut>"]),
+    "list-patterns": (cmd_list_patterns, []),
+    "add-pattern":   (cmd_add_pattern,   ["<regex>", "<label>", "<tool_id>"]),
+    "sound":         (cmd_sound,         ["<subcmd>", "..."]),
+    "config":        (cmd_config,        ["<key>", "<value>"]),
+}
+
+
+def print_help():
+    print(f"\n{BOLD}claude-monitor{RESET}  --  Claude Code Build Monitor CLI\n")
+    for cmd, (fn, args_hint) in COMMANDS.items():
+        hint = "  " + " ".join(args_hint) if args_hint else ""
+        print(f"  {CYAN}{cmd:<18}{RESET}{GRAY}{hint}{RESET}")
+    print()
+    print(f"  {DIM}Ses yonetimi ornekleri:{RESET}")
+    print(f"    claude-monitor sound list")
+    print(f"    claude-monitor sound add alarm ~/alarm.mp3")
+    print(f"    claude-monitor sound set-success alarm")
+    print(f"    claude-monitor sound test alarm")
+    print(f"    claude-monitor sound on|off")
+    print()
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help", "help"):
+        print_help()
+        return
+
+    cmd = args[0]
+    rest = args[1:]
+
+    if cmd not in COMMANDS:
+        err(f"Bilinmeyen komut: {cmd!r}")
+        print_help()
+        sys.exit(1)
+
+    fn, _ = COMMANDS[cmd]
+    try:
+        if rest:
+            fn(rest)
+        else:
+            fn()
+    except TypeError:
+        fn()
+
+
+if __name__ == "__main__":
+    main()
