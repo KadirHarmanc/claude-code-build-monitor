@@ -1,5 +1,12 @@
 # Claude Code Build Monitor
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub stars](https://img.shields.io/github/stars/KadirHarmanc/claude-code-build-monitor)](https://github.com/KadirHarmanc/claude-code-build-monitor/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/KadirHarmanc/claude-code-build-monitor)](https://github.com/KadirHarmanc/claude-code-build-monitor/issues)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-Skill-8A2BE2)](https://github.com/KadirHarmanc/claude-code-build-monitor)
+[![Python 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-green.svg)]()
+
 Real-time progress bars for build commands in Claude Code. Automatically detects 50+ build tools, shows animated TUI progress, plays notification sounds, and tracks build history with SQLite.
 
 ```

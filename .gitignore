@@ -6,3 +6,4 @@ build_history.db
 *.egg-info/
 dist/
 .env
+discussion-post.md
