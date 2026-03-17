@@ -141,25 +141,30 @@ def _register_hooks():
     else:
         config = {}
 
-    hooks = config.setdefault("hooks", [])
+    hooks = config.setdefault("hooks", {})
     pre_cmd  = f"python3 {HOOKS_DIR}/pre_tool_use.py"
     post_cmd = f"python3 {HOOKS_DIR}/post_tool_use.py"
 
+    # Mevcut komutlari topla (dict format)
     existing = []
-    for h in hooks:
-        for inner in h.get("hooks", []):
-            existing.append(inner.get("command", ""))
+    for event_hooks in hooks.values():
+        if isinstance(event_hooks, list):
+            for entry in event_hooks:
+                if isinstance(entry, dict):
+                    for inner in entry.get("hooks", []):
+                        if isinstance(inner, dict):
+                            existing.append(inner.get("command", ""))
 
     added = []
     if pre_cmd not in existing:
-        hooks.insert(0, {
-            "event": "PreToolUse", "matcher": "Bash",
+        hooks.setdefault("PreToolUse", []).append({
+            "matcher": "Bash",
             "hooks": [{"type": "command", "command": pre_cmd}]
         })
         added.append("PreToolUse")
     if post_cmd not in existing:
-        hooks.append({
-            "event": "PostToolUse", "matcher": "Bash",
+        hooks.setdefault("PostToolUse", []).append({
+            "matcher": "Bash",
             "hooks": [{"type": "command", "command": post_cmd}]
         })
         added.append("PostToolUse")
@@ -189,13 +194,22 @@ def cmd_uninstall():
     if SETTINGS.exists():
         try:
             config = json.loads(SETTINGS.read_text())
-            hooks = config.get("hooks", [])
-            hooks = [
-                h for h in hooks
-                if not any("pre_tool_use" in inner.get("command", "") or
-                           "post_tool_use" in inner.get("command", "")
-                           for inner in h.get("hooks", []))
-            ]
+            hooks = config.get("hooks", {})
+            # Dict format: {"PreToolUse": [...], "PostToolUse": [...]}
+            for event in list(hooks.keys()):
+                if isinstance(hooks[event], list):
+                    hooks[event] = [
+                        entry for entry in hooks[event]
+                        if not any(
+                            "pre_tool_use" in inner.get("command", "") or
+                            "post_tool_use" in inner.get("command", "")
+                            for inner in entry.get("hooks", [])
+                            if isinstance(inner, dict)
+                        )
+                    ]
+                    # Bos listeyi temizle
+                    if not hooks[event]:
+                        del hooks[event]
             config["hooks"] = hooks
             SETTINGS.write_text(json.dumps(config, indent=2))
             ok("settings.json temizlendi")
@@ -223,9 +237,18 @@ def cmd_status():
     if SETTINGS.exists():
         try:
             config = json.loads(SETTINGS.read_text())
-            hooks = config.get("hooks", [])
-            has_pre  = any("pre_tool_use"  in inner.get("command", "") for h in hooks for inner in h.get("hooks", []))
-            has_post = any("post_tool_use" in inner.get("command", "") for h in hooks for inner in h.get("hooks", []))
+            hooks = config.get("hooks", {})
+            # Dict format'tan tum komutlari topla
+            all_commands = []
+            for event_hooks in hooks.values():
+                if isinstance(event_hooks, list):
+                    for entry in event_hooks:
+                        if isinstance(entry, dict):
+                            for inner in entry.get("hooks", []):
+                                if isinstance(inner, dict):
+                                    all_commands.append(inner.get("command", ""))
+            has_pre  = any("pre_tool_use"  in cmd for cmd in all_commands)
+            has_post = any("post_tool_use" in cmd for cmd in all_commands)
             if has_pre and has_post:
                 ok("settings.json: hook'lar kayitli")
             else:

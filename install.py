@@ -84,19 +84,38 @@ def update_settings():
     else:
         config = {}
 
-    hooks = config.setdefault("hooks", [])
+    hooks = config.setdefault("hooks", {})
     pre_cmd  = f"python3 {HOOKS_DIR}/pre_tool_use.py"
     post_cmd = f"python3 {HOOKS_DIR}/post_tool_use.py"
 
-    existing = [inner.get("command", "") for h in hooks for inner in h.get("hooks", [])]
+    # hooks dict formatta: {"PreToolUse": [...], "PostToolUse": [...]}
+    # Mevcut komutlari topla
+    def _get_existing_commands(hooks_dict):
+        cmds = []
+        for event_hooks in hooks_dict.values():
+            if isinstance(event_hooks, list):
+                for entry in event_hooks:
+                    if isinstance(entry, dict):
+                        for inner in entry.get("hooks", []):
+                            if isinstance(inner, dict):
+                                cmds.append(inner.get("command", ""))
+        return cmds
+
+    existing = _get_existing_commands(hooks)
     added = []
+
     if pre_cmd not in existing:
-        hooks.insert(0, {"event": "PreToolUse", "matcher": "Bash",
-                          "hooks": [{"type": "command", "command": pre_cmd}]})
+        hooks.setdefault("PreToolUse", []).append({
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": pre_cmd}]
+        })
         added.append("PreToolUse")
+
     if post_cmd not in existing:
-        hooks.append({"event": "PostToolUse", "matcher": "Bash",
-                       "hooks": [{"type": "command", "command": post_cmd}]})
+        hooks.setdefault("PostToolUse", []).append({
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": post_cmd}]
+        })
         added.append("PostToolUse")
 
     with open(SETTINGS, "w") as f:
