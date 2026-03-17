@@ -39,7 +39,7 @@ Real-time progress bars for build commands in Claude Code. Automatically detects
 ## Quick Start
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-code-build-monitor.git
+git clone https://github.com/KadirHarmanc/claude-code-build-monitor.git
 cd claude-code-build-monitor
 python3 install.py
 ```
