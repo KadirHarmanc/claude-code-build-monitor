@@ -29,9 +29,8 @@ if os.environ.get("CLAUDE_MONITOR_DISABLE", "").strip() == "1":
 # ─── Shared imports ──────────────────────────────────────────────────────────
 
 _HOOK_DIR = Path(__file__).parent
-_PROJECT_ROOT = _HOOK_DIR.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+if str(_HOOK_DIR) not in sys.path:
+    sys.path.insert(0, str(_HOOK_DIR))
 
 from shared.paths import STATE_FILE, PID_FILE
 from shared.logging import log as _log

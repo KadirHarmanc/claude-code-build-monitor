@@ -106,7 +106,7 @@ def cmd_install():
         ok(f"Kopyalandi: {dst}")
 
     # shared/ modulu
-    target_shared = HOOKS_DIR.parent / "monitor_shared"
+    target_shared = HOOKS_DIR / "shared"
     if shared_dir.exists():
         if target_shared.exists():
             shutil.rmtree(target_shared)
@@ -186,7 +186,7 @@ def cmd_uninstall():
             ok(f"Silindi: {f}")
 
     # shared modul
-    target_shared = HOOKS_DIR.parent / "monitor_shared"
+    target_shared = HOOKS_DIR / "shared"
     if target_shared.exists():
         shutil.rmtree(target_shared)
         ok(f"Silindi: {target_shared}")
@@ -428,10 +428,10 @@ def cmd_test_pattern(args):
 
     # shared.patterns.detect_build_command fonksiyonunu direkt import etmeye calis
     try:
-        monitor_shared = HOOKS_DIR.parent / "monitor_shared"
-        if str(monitor_shared.parent) not in sys.path:
-            sys.path.insert(0, str(monitor_shared.parent))
-        from monitor_shared.patterns import detect_build_command
+        shared_dir = HOOKS_DIR / "shared"
+        if str(shared_dir.parent) not in sys.path:
+            sys.path.insert(0, str(shared_dir.parent))
+        from shared.patterns import detect_build_command
         result = detect_build_command(command)
     except ImportError:
         # Fallback: eski yontem
@@ -449,10 +449,10 @@ def cmd_list_patterns():
     section("Build Pattern Listesi")
 
     try:
-        monitor_shared = HOOKS_DIR.parent / "monitor_shared"
-        if str(monitor_shared.parent) not in sys.path:
-            sys.path.insert(0, str(monitor_shared.parent))
-        from monitor_shared.patterns import load_patterns
+        shared_dir = HOOKS_DIR / "shared"
+        if str(shared_dir.parent) not in sys.path:
+            sys.path.insert(0, str(shared_dir.parent))
+        from shared.patterns import load_patterns
         patterns = load_patterns()
     except ImportError:
         # Fallback

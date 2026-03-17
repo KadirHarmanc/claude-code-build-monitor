@@ -15,7 +15,7 @@ SCRIPT_DIR  = Path(__file__).parent / "hooks"
 SHARED_DIR  = Path(__file__).parent / "shared"
 CLI_SRC     = Path(__file__).parent / "claude-monitor"
 CLI_DST     = Path.home() / ".local" / "bin" / "claude-monitor"
-TARGET_SHARED = HOOKS_DIR.parent / "monitor_shared"
+TARGET_SHARED = HOOKS_DIR / "shared"
 
 
 def print_banner():
@@ -47,7 +47,7 @@ def copy_hooks():
 
 
 def copy_shared():
-    """shared/ modulunu ~/.claude/monitor_shared/ olarak kopyala."""
+    """shared/ modulunu ~/.claude/hooks/shared/ olarak kopyala."""
     if not SHARED_DIR.exists():
         print(f"x  shared/ dizini bulunamadi: {SHARED_DIR}")
         sys.exit(1)
