@@ -152,15 +152,22 @@ def main() -> None:
     if not command:
         sys.exit(0)
 
+    # Bilinen build araci mi, yoksa genel komut mu?
     result = detect_build_command(command)
-    if not result:
-        sys.exit(0)
+    if result:
+        label, tool = result
+        mode = "full"
+    else:
+        # Genel komut: kisa gosterim
+        cmd_name = command.strip().split()[0].split("/")[-1] if command.strip() else "cmd"
+        label = cmd_name
+        tool = "CMD"
+        mode = "mini"
 
-    label, tool = result
-    log(f"detected [{tool}] {label!r}  cmd={command[:60]!r}")
+    log(f"detected [{tool}] {label!r} mode={mode}  cmd={command[:60]!r}")
 
     ctx = get_project_context()
-    expected = get_expected_duration(tool, ctx["id"])
+    expected = get_expected_duration(tool, ctx["id"]) if mode == "full" else None
     log(f"project={ctx['name']!r} id={ctx['id']} expected={expected}s")
 
     init_db()
@@ -172,6 +179,7 @@ def main() -> None:
             "id":           str(uuid.uuid4())[:8],
             "label":        label,
             "tool":         tool,
+            "mode":         mode,
             "command":      safe_command,
             "project":      ctx["name"],
             "project_id":   ctx["id"],

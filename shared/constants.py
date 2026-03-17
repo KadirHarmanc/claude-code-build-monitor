@@ -19,3 +19,6 @@ GIT_TIMEOUT_SECS = 2
 
 # Overlay hata limiti
 MAX_JSON_ERRORS = 10
+
+# Mini mod: kisa komutlar icin gosterim esigi (saniye)
+MINI_SHOW_AFTER_SECS = 2

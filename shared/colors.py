@@ -92,6 +92,7 @@ TOOL_COLORS = {
     "XCODE":   C_BLUE,
     "TEST":    C_GREEN,
     "GIT":     C_PURPLE,
+    "CMD":     C_GRAY,
 }
 
 

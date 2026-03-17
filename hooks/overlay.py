@@ -32,6 +32,7 @@ from shared.colors import (
 from shared.constants import (
     PHASE_INTERVAL_SECS, PROGRESS_DAMPING, OVERLAY_REFRESH_INTERVAL,
     MAX_PROGRESS_PERCENT, MAX_JSON_ERRORS, COMMAND_PREVIEW_LENGTH,
+    MINI_SHOW_AFTER_SECS,
 )
 
 
@@ -198,6 +199,10 @@ def fmt_eta(cmd: dict) -> str:
 
 
 def render_cmd_block(cmd: dict, spinner_idx: int) -> list:
+    mode = cmd.get("mode", "full")
+    if mode == "mini":
+        return render_mini_block(cmd, spinner_idx)
+
     tool       = cmd.get("tool", "BUILD")
     label      = cmd.get("label", "Building...")
     project    = cmd.get("project", "")
@@ -226,6 +231,10 @@ def render_cmd_block(cmd: dict, spinner_idx: int) -> list:
 
 
 def render_done_block(cmd: dict, success: bool) -> list:
+    mode = cmd.get("mode", "full")
+    if mode == "mini":
+        return render_mini_done_block(cmd, success)
+
     tool    = cmd.get("tool", "BUILD")
     label   = cmd.get("label", "Build")
     project = cmd.get("project", "")
@@ -243,6 +252,38 @@ def render_done_block(cmd: dict, success: bool) -> list:
         f"  {icon}  {tc}{BOLD}[{tool}]{RESET}  {project_str}{C_WHITE}{BOLD}{label}{RESET}  {C_GRAY}{status} in {elapsed}{RESET}",
         f"     {bar}  {C_GRAY}{pct}  {elapsed}{RESET}",
         f"     {DIM}{'-' * min(44, _terminal_width - 6)}{RESET}",
+    ]
+
+
+# ─── Mini mod render (tek satirlik, kisa komutlar icin) ─────────────────────
+
+def render_mini_block(cmd: dict, spinner_idx: int) -> list:
+    """Genel komutlar icin tek satirlik spinner + komut + sure."""
+    elapsed_secs = time.time() - cmd.get("started_at", time.time())
+    # 2 saniyeden kisa surenleri gosterme
+    if elapsed_secs < MINI_SHOW_AFTER_SECS:
+        return []
+
+    spinner = SPINNER_FRAMES[spinner_idx % len(SPINNER_FRAMES)]
+    command = cmd.get("command", "")
+    cmd_prev = command[:45] + ("..." if len(command) > 45 else "")
+    elapsed = fmt_elapsed(cmd.get("started_at", time.time()))
+
+    return [
+        f"  {spinner}  {C_GRAY}${RESET} {DIM}{cmd_prev}{RESET}  {C_GRAY}{elapsed}{RESET}",
+    ]
+
+
+def render_mini_done_block(cmd: dict, success: bool) -> list:
+    """Genel komut tamamlanma -- tek satir."""
+    elapsed = fmt_elapsed(cmd.get("started_at", time.time()))
+    command = cmd.get("command", "")
+    cmd_prev = command[:45] + ("..." if len(command) > 45 else "")
+    icon = f"{C_GREEN}+{RESET}" if success else f"{C_RED}x{RESET}"
+    status = "done" if success else "fail"
+
+    return [
+        f"  {icon}  {C_GRAY}${RESET} {DIM}{cmd_prev}{RESET}  {C_GRAY}{status} {elapsed}{RESET}",
     ]
 
 # ─── Main loop ────────────────────────────────────────────────────────────────
