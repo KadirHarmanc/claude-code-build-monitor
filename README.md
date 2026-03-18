@@ -223,6 +223,37 @@ Contributions are welcome! Some ideas:
 - Webhook notifications (Slack, Discord)
 - Build time trend graphs
 
+## Changelog
+
+### v3.2 (2026-03-18)
+- 30+ new build patterns: webpack, esbuild, vite, rollup, parcel, deno, dotnet, ruby, php, bazel, podman, and more
+- Universal command tracking: mini spinner for all bash commands (not just build tools)
+- Time-based elapsed coloring: green (<30s), yellow (<60s), red (>60s)
+- Multi-command header when 2+ commands running
+- New CLI: `top`, `last`, `projects`, `clear-history`
+- Test suite: 27 tests covering all shared modules
+
+### v3.1 (2026-03-18)
+- Mini mode: compact single-line spinner for non-build commands
+- Shows after 2 second threshold to avoid flicker
+
+### v3.0 (2026-03-18)
+- Complete rewrite with `shared/` module architecture
+- Security: UID-isolated temp dirs, AppleScript injection prevention, credential redaction
+- Atomic file locking with `fcntl.flock`
+- SQLite WAL mode + timestamp index
+- Sound management: `claude-monitor sound` with list, add, remove, set, test, on/off
+- Custom patterns via `~/.claude/monitor_patterns.json`
+- TTY/NO_COLOR/TERM=dumb detection
+- `from __future__ import annotations` for Python 3.8+ compatibility
+
+### v2.0
+- Initial public release
+- 50+ build tool patterns
+- TUI progress bar with phases and ETA
+- SQLite build history
+- macOS + Linux notification support
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
