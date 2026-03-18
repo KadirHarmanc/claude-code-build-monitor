@@ -7,7 +7,7 @@
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-green.svg)]()
 
-Real-time progress bars for build commands in Claude Code. Automatically detects 50+ build tools, shows animated TUI progress, plays notification sounds, and tracks build history with SQLite.
+Real-time progress bars for build commands in Claude Code. Automatically detects 80+ build tools, shows animated TUI progress, plays notification sounds, and tracks build history with SQLite.
 
 ```
   ⠹  [NPM]  my-project  npm build  Linking modules
@@ -16,11 +16,18 @@ Real-time progress bars for build commands in Claude Code. Automatically detects
      ──────────────────────────────────────────
 ```
 
+For non-build commands, a compact mini spinner appears after 2 seconds:
+
+```
+  ⠹  $ python3 script.py  12s
+```
+
 ## Features
 
-- **Auto-detection** — Recognizes 50+ build tools via regex patterns (npm, yarn, docker, terraform, k8s, cargo, go, and more)
-- **Real-time TUI** — Animated progress bar with spinner, phase text, ETA, and elapsed time
-- **Parallel builds** — Track multiple concurrent build commands simultaneously
+- **Universal tracking** — All bash commands tracked: full progress bar for build tools, compact spinner for everything else
+- **Auto-detection** — Recognizes 80+ build tools via regex patterns (npm, webpack, docker, terraform, k8s, cargo, dotnet, and more)
+- **Real-time TUI** — Animated progress bar with spinner, phase text, ETA, and time-colored elapsed display
+- **Parallel builds** — Track multiple concurrent build commands with multi-command header
 - **Smart ETA** — Estimates completion time based on SQLite history of previous builds
 - **Sound notifications** — Plays system sounds on build success/failure with full customization
 - **Native OS notifications** — macOS (osascript) and Linux (notify-send) desktop alerts
@@ -34,14 +41,20 @@ Real-time progress bars for build commands in Claude Code. Automatically detects
 | Category | Tools |
 |----------|-------|
 | Package Managers | npm, yarn, pnpm, bun |
+| Bundlers | webpack, esbuild, rollup, vite, parcel, tsup, unbuild |
 | Monorepo | nx, turbo, lerna |
-| Containers | docker, docker-compose |
+| Containers | docker, docker-compose, podman, buildah |
 | Deploy | vercel, netlify, fly, cloudflare, aws, gcloud, heroku, railway, render |
 | IaC | terraform, pulumi, ansible, kubectl, helm |
-| Build | cargo, go, make, cmake, gradle, maven, swift, xcodebuild |
+| Build | cargo, go, make, cmake, gradle, maven, swift, xcodebuild, bazel, buck, ninja, meson, ant |
+| .NET | dotnet build, dotnet publish, dotnet test |
+| Ruby | bundle, rails, rake |
+| PHP | composer, artisan, phpunit |
+| Deno | deno compile, deno bundle, deno test |
 | Python | pip, poetry, uv |
-| Test | jest, pytest, vitest, mocha, playwright, cypress, go test, cargo test |
+| Test | jest, pytest, vitest, mocha, playwright, cypress, go test, cargo test, phpunit, deno test, dotnet test |
 | VCS | git push |
+| Other | All other bash commands get a compact mini spinner |
 
 ## Quick Start
 
