@@ -784,6 +784,125 @@ def cmd_config(args):
     print(f"\n    export {key}=\"{value}\"\n")
     info("Ardindan terminali yeniden baslatin veya: source ~/.zshrc")
 
+# ─── clear-history ────────────────────────────────────────────────────────────
+
+def cmd_clear_history():
+    section("Build Gecmisi Temizleme")
+    if not HISTORY_DB.exists():
+        info("Gecmis zaten bos")
+        return
+    warn("Tum build gecmisi silinecek.")
+    try:
+        confirm = input("  Emin misin? (e/h): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        info("Iptal edildi")
+        return
+    if confirm != "e":
+        info("Iptal edildi")
+        return
+    try:
+        import sqlite3
+        with sqlite3.connect(str(HISTORY_DB)) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM builds").fetchone()[0]
+            conn.execute("DELETE FROM builds")
+        ok(f"{count} kayit silindi")
+    except Exception as e:
+        err(f"Hata: {e}")
+
+# ─── top ──────────────────────────────────────────────────────────────────────
+
+def cmd_top():
+    section("En Uzun 10 Build")
+    if not HISTORY_DB.exists():
+        info("Gecmis bulunamadi")
+        return
+    try:
+        import sqlite3
+        with sqlite3.connect(str(HISTORY_DB)) as conn:
+            rows = conn.execute("""
+                SELECT tool, label, project_name, duration, timestamp
+                FROM builds WHERE success=1 AND duration IS NOT NULL
+                ORDER BY duration DESC LIMIT 10
+            """).fetchall()
+    except Exception as e:
+        err(f"DB hatasi: {e}")
+        return
+    if not rows:
+        info("Kayit yok")
+        return
+    print(f"  {'#':<4}{'Arac':<10}{'Komut':<18}{'Proje':<16}{'Sure':>8}  {'Tarih'}")
+    print(f"  {DIM}{'-'*4}{'-'*10}{'-'*18}{'-'*16}{'-'*8}  {'-'*16}{RESET}")
+    for i, (tool, label, project, dur, ts) in enumerate(rows, 1):
+        dur_s = f"{int(dur//60)}m{int(dur%60):02d}s" if dur >= 60 else f"{int(dur)}s"
+        proj = (project or "")[:14]
+        ts_fmt = ts[:16] if ts else ""
+        color = RED if dur > 120 else (YELLOW if dur > 60 else GREEN)
+        print(f"  {GRAY}{i:<4}{RESET}{PURPLE}{tool:<10}{RESET}{label:<18}{proj:<16}{color}{dur_s:>7}{RESET}  {GRAY}{ts_fmt}{RESET}")
+
+# ─── last ─────────────────────────────────────────────────────────────────────
+
+def cmd_last():
+    section("Son Build")
+    if not HISTORY_DB.exists():
+        info("Gecmis bulunamadi")
+        return
+    try:
+        import sqlite3
+        with sqlite3.connect(str(HISTORY_DB)) as conn:
+            row = conn.execute("""
+                SELECT tool, label, project_name, duration, success, timestamp
+                FROM builds ORDER BY timestamp DESC LIMIT 1
+            """).fetchone()
+    except Exception as e:
+        err(f"DB hatasi: {e}")
+        return
+    if not row:
+        info("Kayit yok")
+        return
+    tool, label, project, dur, success, ts = row
+    icon = f"{GREEN}+{RESET}" if success else f"{RED}x{RESET}"
+    status = "Basarili" if success else "Basarisiz"
+    dur_s = f"{int(dur)}s" if dur and dur < 60 else (f"{int(dur//60)}m{int(dur%60):02d}s" if dur else "?")
+    print(f"  {icon}  {PURPLE}{BOLD}[{tool}]{RESET}  {label}")
+    print(f"     Proje:  {project or '-'}")
+    print(f"     Sure:   {dur_s}")
+    print(f"     Durum:  {status}")
+    print(f"     Tarih:  {GRAY}{ts}{RESET}")
+
+# ─── projects ─────────────────────────────────────────────────────────────────
+
+def cmd_projects():
+    section("Takip Edilen Projeler")
+    if not HISTORY_DB.exists():
+        info("Gecmis bulunamadi")
+        return
+    try:
+        import sqlite3
+        with sqlite3.connect(str(HISTORY_DB)) as conn:
+            rows = conn.execute("""
+                SELECT project_name, project_id, COUNT(*) as builds,
+                       AVG(CASE WHEN success=1 THEN duration END) as avg_dur,
+                       SUM(success) as successes
+                FROM builds
+                WHERE project_name IS NOT NULL AND project_name != ''
+                GROUP BY project_id
+                ORDER BY builds DESC
+            """).fetchall()
+    except Exception as e:
+        err(f"DB hatasi: {e}")
+        return
+    if not rows:
+        info("Kayit yok")
+        return
+    print(f"  {'Proje':<20}{'Build':>7}{'Basari':>8}{'Ort. Sure':>10}")
+    print(f"  {DIM}{'-'*20}{'-'*7}{'-'*8}{'-'*10}{RESET}")
+    for name, pid, builds, avg, succ in rows:
+        pct = int((succ / builds) * 100) if builds else 0
+        pct_color = GREEN if pct >= 90 else (YELLOW if pct >= 70 else RED)
+        avg_s = f"{int(avg)}s" if avg and avg < 60 else (f"{int(avg//60)}m{int(avg%60):02d}s" if avg else "-")
+        print(f"  {CYAN}{(name or '-')[:18]:<20}{RESET}{builds:>5}  {pct_color}{pct:>5}%{RESET}  {GRAY}{avg_s:>8}{RESET}")
+
 # ─── Router ───────────────────────────────────────────────────────────────────
 
 COMMANDS = {
@@ -792,6 +911,10 @@ COMMANDS = {
     "status":        (cmd_status,        []),
     "history":       (cmd_history,       ["--tool", "--limit"]),
     "stats":         (cmd_stats,         []),
+    "top":           (cmd_top,           []),
+    "last":          (cmd_last,          []),
+    "projects":      (cmd_projects,      []),
+    "clear-history": (cmd_clear_history, []),
     "test-pattern":  (cmd_test_pattern,  ["<komut>"]),
     "list-patterns": (cmd_list_patterns, []),
     "add-pattern":   (cmd_add_pattern,   ["<regex>", "<label>", "<tool_id>"]),

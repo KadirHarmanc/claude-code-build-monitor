@@ -62,6 +62,52 @@ DEFAULT_PATTERNS: List[Tuple[str, str, str]] = [
     (r'\bswift\s+build\b',                                       'swift build',    'SWIFT'),
     (r'\bxcodebuild\b',                                          'xcode build',    'XCODE'),
 
+    # Bundlers
+    (r'\bwebpack\b',                                              'webpack',        'WEBPACK'),
+    (r'\besbuild\b',                                              'esbuild',        'ESBUILD'),
+    (r'\brollup\b',                                               'rollup',         'ROLLUP'),
+    (r'\bvite\s+build\b',                                         'vite build',     'VITE'),
+    (r'\bparcel\s+(build|watch)\b',                               'parcel build',   'PARCEL'),
+    (r'\btsup\b',                                                 'tsup',           'TSUP'),
+    (r'\bunbuild\b',                                              'unbuild',        'UNBUILD'),
+
+    # Deno
+    (r'\bdeno\s+(compile|bundle)\b',                              'deno build',     'DENO'),
+    (r'\bdeno\s+test\b',                                          'deno test',      'TEST'),
+
+    # Package managers extra
+    (r'\bnpm\s+ci\b',                                             'npm ci',         'NPM'),
+    (r'\bnpm\s+publish\b',                                        'npm publish',    'NPM'),
+    (r'\byarn\s+add\b',                                           'yarn add',       'YARN'),
+    (r'\bpnpm\s+add\b',                                           'pnpm add',       'PNPM'),
+    (r'\bbun\s+add\b',                                             'bun add',        'BUN'),
+
+    # Containers extra
+    (r'\bpodman\s+build\b',                                       'podman build',   'PODMAN'),
+    (r'\bbuildah\s+bud\b',                                        'buildah build',  'BUILDAH'),
+
+    # Ruby
+    (r'\bbundle\s+install\b',                                     'bundle install', 'RUBY'),
+    (r'\brails\s+assets:precompile\b',                            'rails assets',   'RUBY'),
+    (r'\brake\b',                                                  'rake',           'RUBY'),
+
+    # PHP
+    (r'\bcomposer\s+(install|update|require)\b',                  'composer',       'PHP'),
+    (r'\bartisan\b',                                               'artisan',        'PHP'),
+    (r'\bphpunit\b',                                               'phpunit',        'TEST'),
+
+    # .NET
+    (r'\bdotnet\s+(build|publish)\b',                             'dotnet build',   'DOTNET'),
+    (r'\bdotnet\s+test\b',                                        'dotnet test',    'TEST'),
+    (r'\bdotnet\s+restore\b',                                     'dotnet restore', 'DOTNET'),
+
+    # Misc build systems
+    (r'\bbazel\s+build\b',                                        'bazel build',    'BAZEL'),
+    (r'\bbuck\s+build\b',                                         'buck build',     'BUCK'),
+    (r'\bninja\b',                                                 'ninja build',    'NINJA'),
+    (r'\bmeson\s+(setup|compile)\b',                              'meson build',    'MESON'),
+    (r'\bant\s+(build|compile|jar)\b',                            'ant build',      'ANT'),
+
     # Test araclari
     (r'\bjest\b',                                                'jest tests',     'TEST'),
     (r'\bpytest\b',                                              'pytest',         'TEST'),

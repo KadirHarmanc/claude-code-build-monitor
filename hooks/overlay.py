@@ -27,7 +27,7 @@ from shared.paths import STATE_FILE, PID_FILE
 from shared.logging import log as _log
 from shared.colors import (
     RESET, BOLD, DIM, HIDE_CURSOR, SHOW_CURSOR, CLEAR_LINE, MOVE_UP,
-    C_PURPLE, C_GREEN, C_RED, C_GRAY, C_WHITE, TOOL_COLORS,
+    C_PURPLE, C_GREEN, C_RED, C_GRAY, C_WHITE, C_YELLOW, TOOL_COLORS,
 )
 from shared.constants import (
     PHASE_INTERVAL_SECS, PROGRESS_DAMPING, OVERLAY_REFRESH_INTERVAL,
@@ -70,6 +70,19 @@ PHASES = {
     "UV":      ["Resolving", "Downloading", "Installing", "Done"],
     "TEST":    ["Collecting tests", "Setting up", "Running", "Coverage", "Done"],
     "GIT":     ["Packing objects", "Uploading", "Processing", "Done"],
+    "WEBPACK": ["Reading config", "Resolving modules", "Bundling", "Optimizing", "Done"],
+    "ESBUILD": ["Scanning", "Linking", "Bundling", "Done"],
+    "VITE":    ["Scanning deps", "Pre-bundling", "Building", "Done"],
+    "ROLLUP":  ["Parsing modules", "Tree-shaking", "Bundling", "Done"],
+    "PARCEL":  ["Building dep graph", "Transforming", "Packaging", "Done"],
+    "DENO":    ["Checking", "Compiling", "Bundling", "Done"],
+    "DOTNET":  ["Restoring", "Compiling", "Linking", "Done"],
+    "RUBY":    ["Resolving deps", "Installing gems", "Building", "Done"],
+    "PHP":     ["Resolving deps", "Downloading", "Installing", "Done"],
+    "PODMAN":  ["Reading Containerfile", "Pulling base", "Building layers", "Done"],
+    "BAZEL":   ["Loading packages", "Analyzing", "Building", "Done"],
+    "NINJA":   ["Parsing build.ninja", "Compiling", "Linking", "Done"],
+    "MESON":   ["Configuring", "Compiling", "Linking", "Done"],
     "_DEFAULT":["Initializing", "Processing", "Building", "Finalizing", "Done"],
 }
 
@@ -184,6 +197,30 @@ def fmt_elapsed(started_at: float) -> str:
     return f"{m}m {s%60:02d}s" if m else f"{s}s"
 
 
+def color_elapsed(started_at: float) -> str:
+    """Sure bazli renkli elapsed: <30s yesil, 30-60s sari, >60s kirmizi."""
+    s = int(time.time() - started_at)
+    raw = fmt_elapsed(started_at)
+    if s < 30:
+        return f"{C_GREEN}{raw}{RESET}"
+    elif s < 60:
+        return f"{C_YELLOW}{raw}{RESET}"
+    else:
+        return f"{C_RED}{raw}{RESET}"
+
+
+def render_header(running_count: int) -> list:
+    """2+ komut calisirken header goster."""
+    if running_count < 2:
+        return []
+    w = min(44, _terminal_width - 6)
+    label = f" Claude Monitor ({running_count} running) "
+    pad = w - len(label)
+    left = pad // 2
+    right = pad - left
+    return [f"  {DIM}{'-' * left}{RESET}{C_GRAY}{label}{RESET}{DIM}{'-' * right}{RESET}"]
+
+
 def fmt_eta(cmd: dict) -> str:
     expected = cmd.get("expected")
     if not expected:
@@ -220,10 +257,11 @@ def render_cmd_block(cmd: dict, spinner_idx: int) -> list:
 
     project_str = f"{DIM}{project}  {RESET}" if project else ""
     tag         = f"{tc}{BOLD}[{tool}]{RESET}"
+    c_elapsed   = color_elapsed(cmd.get("started_at", time.time()))
 
     lines = [
         f"  {spinner}  {tag}  {project_str}{C_WHITE}{BOLD}{label}{RESET}  {DIM}{phase_text}{RESET}",
-        f"     {bar}  {C_GRAY}{pct}  {elapsed}{eta}{RESET}",
+        f"     {bar}  {C_GRAY}{pct}{RESET}  {c_elapsed}{eta}",
         f"     {DIM}$ {cmd_prev}{RESET}",
         f"     {DIM}{'-' * min(44, _terminal_width - 6)}{RESET}",
     ]
@@ -267,23 +305,23 @@ def render_mini_block(cmd: dict, spinner_idx: int) -> list:
     spinner = SPINNER_FRAMES[spinner_idx % len(SPINNER_FRAMES)]
     command = cmd.get("command", "")
     cmd_prev = command[:45] + ("..." if len(command) > 45 else "")
-    elapsed = fmt_elapsed(cmd.get("started_at", time.time()))
+    c_elapsed = color_elapsed(cmd.get("started_at", time.time()))
 
     return [
-        f"  {spinner}  {C_GRAY}${RESET} {DIM}{cmd_prev}{RESET}  {C_GRAY}{elapsed}{RESET}",
+        f"  {spinner}  {C_GRAY}${RESET} {DIM}{cmd_prev}{RESET}  {c_elapsed}",
     ]
 
 
 def render_mini_done_block(cmd: dict, success: bool) -> list:
     """Genel komut tamamlanma -- tek satir."""
-    elapsed = fmt_elapsed(cmd.get("started_at", time.time()))
+    c_elapsed = color_elapsed(cmd.get("started_at", time.time()))
     command = cmd.get("command", "")
     cmd_prev = command[:45] + ("..." if len(command) > 45 else "")
     icon = f"{C_GREEN}+{RESET}" if success else f"{C_RED}x{RESET}"
     status = "done" if success else "fail"
 
     return [
-        f"  {icon}  {C_GRAY}${RESET} {DIM}{cmd_prev}{RESET}  {C_GRAY}{status} {elapsed}{RESET}",
+        f"  {icon}  {C_GRAY}${RESET} {DIM}{cmd_prev}{RESET}  {C_GRAY}{status}{RESET} {c_elapsed}",
     ]
 
 # ─── Main loop ────────────────────────────────────────────────────────────────
@@ -343,7 +381,7 @@ def main() -> None:
                 sys.stderr.flush()
                 break
 
-            output_lines = []
+            output_lines = render_header(len(running_cmds))
             for cmd in running_cmds:
                 output_lines.extend(render_cmd_block(cmd, spinner_idx))
 
